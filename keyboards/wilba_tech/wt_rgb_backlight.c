@@ -103,7 +103,7 @@ LED_TYPE g_ws2812_leds[WS2812_LED_TOTAL];
 #endif
 #endif
 
-#define BACKLIGHT_EFFECT_MAX 10
+#define BACKLIGHT_EFFECT_MAX 12
 
 backlight_config g_config = {
     .use_split_backspace = RGB_BACKLIGHT_USE_SPLIT_BACKSPACE,
@@ -144,6 +144,11 @@ uint32_t g_tick = 0;
 
 // Ticks since this key was last hit.
 uint8_t g_key_hit[BACKLIGHT_LED_COUNT];
+
+// Ticks since this key was last hit.
+bool g_key_down[BACKLIGHT_LED_COUNT];
+
+bool g_key_hit_higher_layer[BACKLIGHT_LED_COUNT];
 
 // Ticks since any key was last hit.
 uint32_t g_any_key_hit = 0;
@@ -1599,8 +1604,21 @@ void backlight_set_key_hit(uint8_t row, uint8_t column)
     uint8_t led;
     map_row_column_to_led(row,column,&led);
     g_key_hit[led] = 0;
+    g_key_down[led] = true;
+    if (IS_LAYER_ON(1) || IS_LAYER_ON(2) || IS_LAYER_ON(3)) {
+        g_key_hit_higher_layer[led] = true;
+    } else {
+        g_key_hit_higher_layer[led] = false;
+    }
 
     g_any_key_hit = 0;
+}
+
+void backlight_set_key_released(uint8_t row, uint8_t column)
+{
+    uint8_t led;
+    map_row_column_to_led(row,column,&led);
+    g_key_down[led] = false;
 }
 
 #if !defined(RGB_BACKLIGHT_HS60) && !defined(RGB_BACKLIGHT_NK65) && !defined(RGB_BACKLIGHT_NEBULA68) && !defined(RGB_BACKLIGHT_NEBULA12) && !defined(RGB_BACKLIGHT_NK87) && !defined(RGB_BACKLIGHT_KW_MEGA)
@@ -2064,6 +2082,63 @@ void backlight_effect_cycle_radial2(void)
     }
 }
 
+void backlight_effect_reactive_simple(void)
+{
+    for ( int i=0; i<BACKLIGHT_LED_COUNT; i++ )
+    {
+        HS color = g_config.color_1;
+        uint8_t offset = g_key_hit[i];
+        if (g_key_hit_higher_layer[i]) {
+            color = g_config.color_2;
+        }
+#if !defined(RGB_BACKLIGHT_HS60) && !defined(RGB_BACKLIGHT_NK65) && !defined(RGB_BACKLIGHT_DAWN60)
+        // stabilizer LEDs use spacebar hits
+        if ( i == 36+6 || i == 54+13 || // LC6, LD13
+                ( g_config.use_7u_spacebar && i == 54+14 ) ) // LD14
+        {
+            offset = g_key_hit[36+0];
+            if (g_key_hit_higher_layer[36+0]) {
+                color = g_config.color_2;
+            }
+        }
+#endif
+
+        uint8_t brightness = g_config.brightness - MIN(offset << g_config.effect_speed << 4, g_config.brightness);
+
+        HSV hsv = { .h = color.h, .s = color.s, .v = brightness };
+        RGB rgb = hsv_to_rgb( hsv );
+        backlight_set_color( i, rgb.r, rgb.g, rgb.b );
+    }
+}
+
+void backlight_effect_reactive(void)
+{
+    for ( int i=0; i<BACKLIGHT_LED_COUNT; i++ )
+    {
+        HS background = g_config.color_1;
+        HS highlight = g_config.color_2;
+        uint8_t offset = g_key_hit[i];
+#if !defined(RGB_BACKLIGHT_HS60) && !defined(RGB_BACKLIGHT_NK65) && !defined(RGB_BACKLIGHT_DAWN60)
+        // stabilizer LEDs use spacebar hits
+        if ( i == 36+6 || i == 54+13 || // LC6, LD13
+                ( g_config.use_7u_spacebar && i == 54+14 ) ) // LD14
+        {
+            offset = g_key_hit[36+0];
+        }
+#endif
+
+        // Offset is a value from 0 to 255, at 0 we should use `highlight`, a
+        // 255 we should use background
+        uint16_t scale = offset << g_config.effect_speed;
+        uint8_t h = highlight.h - ((highlight.h - background.h) * MIN(scale / 255.0, 1.0));
+        uint8_t s = highlight.s - ((highlight.s - background.s) * MIN(scale / 255.0, 1.0));
+
+        HSV hsv = { .h = h, .s = s, .v = g_config.brightness };
+        RGB rgb = hsv_to_rgb( hsv );
+        backlight_set_color( i, rgb.r, rgb.g, rgb.b );
+    }
+}
+
 #if defined(RGB_BACKLIGHT_M6_B) || defined(RGB_BACKLIGHT_M10_C)
 void backlight_effect_custom_colors(void)
 {
@@ -2185,7 +2260,7 @@ static void gpt_backlight_timer_task(GPTDriver *gptp)
 
     for ( int led = 0; led < BACKLIGHT_LED_COUNT; led++ )
     {
-        if ( g_key_hit[led] < 255 )
+        if ( g_key_hit[led] < 255 && !g_key_down[led] )
         {
             g_key_hit[led]++;
         }
@@ -2252,6 +2327,12 @@ static void gpt_backlight_timer_task(GPTDriver *gptp)
             break;
         case 10:
             backlight_effect_cycle_radial2();
+            break;
+        case 11:
+            backlight_effect_reactive_simple();
+            break;
+        case 12:
+            backlight_effect_reactive();
             break;
         default:
             backlight_effect_all_off();
@@ -2872,6 +2953,7 @@ void backlight_init_drivers(void)
     for ( int led=0; led<BACKLIGHT_LED_COUNT; led++ )
     {
         g_key_hit[led] = 255;
+        g_key_down[led] = false;
     }
 }
 
@@ -2881,6 +2963,8 @@ bool process_record_backlight(uint16_t keycode, keyrecord_t *record)
     if ( record->event.pressed )
     {
         backlight_set_key_hit( record->event.key.row, record->event.key.col );
+    } else {
+        backlight_set_key_released( record->event.key.row, record->event.key.col );
     }
 
     switch(keycode)
