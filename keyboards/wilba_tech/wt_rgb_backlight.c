@@ -2195,6 +2195,33 @@ void backlight_effect_indicators_set_colors( uint8_t index, HS color )
     }
 }
 
+void backlight_set_layer_rgb(uint8_t layer, HS color) {
+    HSV hsv = { .h = color.h, .s = color.s, .v = g_config.brightness };
+    RGB rgb = hsv_to_rgb(hsv);
+    for (uint8_t row = 0; row<MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col<MATRIX_COLS; col++) {
+            uint16_t keycode = keymaps[layer][row][col];
+            if (keycode != KC_TRNS && keycode != KC_NO) {
+                uint8_t index = g_map_row_column_to_led[row][col];
+                backlight_set_color(index, rgb.r, rgb.g, rgb.b);
+                if (keycode >= BR_INC && keycode <= S2_DEC) {
+                    HSV hsv = { .h = 0, .s = 242, .v = g_config.brightness };
+                    RGB rgb = hsv_to_rgb(hsv);
+                    backlight_set_color(index, rgb.r, rgb.g, rgb.b);
+                } else if (IS_CONSUMER(keycode)) {
+                    HSV hsv = { .h = 104, .s = 242, .v = g_config.brightness };
+                    RGB rgb = hsv_to_rgb(hsv);
+                    backlight_set_color(index, rgb.r, rgb.g, rgb.b);
+                } else if (keycode >= KC_HOME && keycode <= KC_UP) {
+                    HSV hsv = { .h = 176, .s = 242, .v = g_config.brightness };
+                    RGB rgb = hsv_to_rgb(hsv);
+                    backlight_set_color(index, rgb.r, rgb.g, rgb.b);
+                }
+            }
+        }
+    }
+}
+
 // This runs after another backlight effect and replaces
 // colors already set
 void backlight_effect_indicators(void)
@@ -2220,6 +2247,7 @@ void backlight_effect_indicators(void)
         {
             backlight_effect_indicators_set_colors( g_config.layer_3_indicator.index, g_config.layer_3_indicator.color );
         }
+        backlight_set_layer_rgb(3, g_config.layer_1_indicator.color);
     }
     else if ( IS_LAYER_ON(2) )
     {
@@ -2227,6 +2255,7 @@ void backlight_effect_indicators(void)
         {
             backlight_effect_indicators_set_colors( g_config.layer_2_indicator.index, g_config.layer_2_indicator.color );
         }
+        backlight_set_layer_rgb(2, g_config.layer_1_indicator.color);
     }
     else if ( IS_LAYER_ON(1) )
     {
@@ -2234,6 +2263,7 @@ void backlight_effect_indicators(void)
         {
             backlight_effect_indicators_set_colors( g_config.layer_1_indicator.index, g_config.layer_1_indicator.color );
         }
+        backlight_set_layer_rgb(1, g_config.layer_1_indicator.color);
     }
 }
 
